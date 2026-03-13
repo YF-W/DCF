@@ -1,7 +1,7 @@
 Official implementation of DCF code.
 ## 🗒Datasets
 
-1. ACDC: [https://github.com/HiLab-git/SSL4MIS]([https://github.com/HiLab-git/SSL4MIS)
+1. ACDC: [https://github.com/HiLab-git/SSL4MIS](https://github.com/HiLab-git/SSL4MIS)
 
 2. PROMISE12: [https://promise12.grand-challenge.org/](https://promise12.grand-challenge.org/)
 
