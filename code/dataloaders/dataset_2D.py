@@ -42,11 +42,16 @@ class BaseDataSets(Dataset):
             h5f = h5py.File(self._base_dir + "/data/{}.h5".format(case), 'r')
         image = h5f['image'][:]
         label = h5f['label'][:]
+        
+        image = image.astype(np.float32)
+        label = label.astype(np.uint8)
+
         sample = {'image': image, 'label': label}
         if self.split == "train":
             sample = self.transform(sample)
         sample["idx"] = idx
         return sample
+
 
 def random_rot_flip(image, label):
     k = np.random.randint(0, 4)
@@ -57,12 +62,12 @@ def random_rot_flip(image, label):
     label = np.flip(label, axis=axis).copy()
     return image, label
 
+
 def random_rotate(image, label):
     angle = np.random.randint(-20, 20)
     image = ndimage.rotate(image, angle, order=0, reshape=False)
     label = ndimage.rotate(label, angle, order=0, reshape=False)
     return image, label
-
 
 class RandomGenerator(object):
 

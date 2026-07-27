@@ -23,7 +23,6 @@ def test_single_volume(image, label, model_1, model_2, classes, patch_size=[224,
     ).numpy(), label.squeeze(0).cpu().detach().numpy()
     prediction_1 = np.zeros_like(label)
     prediction_2 = np.zeros_like(label)
-    prediction_fusion = np.zeros_like(label)
     for ind in range(image.shape[0]):
         slice = image[ind, :, :]
         x, y = slice.shape[0], slice.shape[1]
@@ -38,7 +37,6 @@ def test_single_volume(image, label, model_1, model_2, classes, patch_size=[224,
             except:
                 output_1 = model_1(input)
                 output_2 = model_2(input)
-            output_fusion = (output_1 + output_2) / 2
             out_1 = torch.argmax(torch.softmax(output_1, dim=1), dim=1).squeeze(0)
             out_1 = out_1.cpu().detach().numpy()
             pred_1 = zoom(out_1, (x / patch_size[0], y / patch_size[1]), order=0)
@@ -47,15 +45,9 @@ def test_single_volume(image, label, model_1, model_2, classes, patch_size=[224,
             out_2 = out_2.cpu().detach().numpy()
             pred_2 = zoom(out_2, (x / patch_size[0], y / patch_size[1]), order=0)
             prediction_2[ind] = pred_2
-            out_fusion = torch.argmax(torch.softmax(output_fusion, dim=1), dim=1).squeeze(0)
-            out_fusion = out_fusion.cpu().detach().numpy()
-            pred_fusion = zoom(out_fusion, (x / patch_size[0], y / patch_size[1]), order=0)
-            prediction_fusion[ind] = pred_fusion
     metric_list_1 = []
     metric_list_2 = []
-    metric_list_fusion = []
     for i in range(1, classes):
         metric_list_1.append(calculate_metric_percase(prediction_1 == i, label == i))
         metric_list_2.append(calculate_metric_percase(prediction_2 == i, label == i))
-        metric_list_fusion.append(calculate_metric_percase(prediction_fusion == i, label == i))
-    return metric_list_1, metric_list_2, metric_list_fusion
+    return metric_list_1, metric_list_2

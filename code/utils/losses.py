@@ -7,6 +7,78 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.nn import functional as F
 
+class mask_DiceLoss(nn.Module):
+    def __init__(self, nclass, class_weights=None, smooth=1e-5):
+        super(mask_DiceLoss, self).__init__()
+        self.smooth = smooth
+        if class_weights is None:
+            # default weight is all 1
+            self.class_weights = nn.Parameter(torch.ones((1, nclass)).type(torch.float32), requires_grad=False)
+        else:
+            class_weights = np.array(class_weights)
+            assert nclass == class_weights.shape[0]
+            self.class_weights = nn.Parameter(torch.tensor(class_weights, dtype=torch.float32), requires_grad=False)
+
+    def prob_forward(self, pred, target, mask=None):
+        size = pred.size()
+        N, nclass = size[0], size[1]
+        # N x C x H x W
+        pred_one_hot = pred.view(N, nclass, -1)
+        target = target.view(N, 1, -1)
+        target_one_hot = to_one_hot(target.type(torch.long), nclass).type(torch.float32)
+
+        # N x C x H x W
+        inter = pred_one_hot * target_one_hot
+        union = pred_one_hot + target_one_hot
+
+        if mask is not None:
+            mask = mask.view(N, 1, -1)
+            inter = (inter.view(N, nclass, -1) * mask).sum(2)
+            union = (union.view(N, nclass, -1) * mask).sum(2)
+        else:
+            # N x C
+            inter = inter.view(N, nclass, -1).sum(2)
+            union = union.view(N, nclass, -1).sum(2)
+
+        # smooth to prevent overfitting
+        # [https://github.com/pytorch/pytorch/issues/1249]
+        # NxC
+        dice = (2 * inter + self.smooth) / (union + self.smooth)
+        return 1 - dice.mean()
+
+    def forward(self, logits, target, mask=None):
+        size = logits.size()
+        N, nclass = size[0], size[1]
+
+        logits = logits.view(N, nclass, -1)
+        target = target.view(N, 1, -1)
+
+        pred, nclass = get_probability(logits)
+
+        # N x C x H x W
+        pred_one_hot = pred
+        target_one_hot = to_one_hot(target.type(torch.long), nclass).type(torch.float32)
+
+        # N x C x H x W
+        inter = pred_one_hot * target_one_hot
+        union = pred_one_hot + target_one_hot
+
+        if mask is not None:
+            mask = mask.view(N, 1, -1)
+            inter = (inter.view(N, nclass, -1) * mask).sum(2)
+            union = (union.view(N, nclass, -1) * mask).sum(2)
+        else:
+            # N x C
+            inter = inter.view(N, nclass, -1).sum(2)
+            union = union.view(N, nclass, -1).sum(2)
+
+        # smooth to prevent overfitting
+        # [https://github.com/pytorch/pytorch/issues/1249]
+        # NxC
+        dice = (2 * inter + self.smooth) / (union + self.smooth)
+        return 1 - dice.mean()
+
+
 
 def Binary_dice_loss(predictive, target, ep=1e-8):
     intersection = 2 * torch.sum(predictive * target) + ep

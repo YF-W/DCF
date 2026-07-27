@@ -11,10 +11,12 @@ from medpy import metric
 from scipy.ndimage import zoom
 from tqdm import tqdm
 from networks.net_factory_2D import net_factory
+from utils import ramps
+import torch.nn.functional as F
 import csv
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--root_path', type=str, default='../../data/ATLAS', help='Name of Experiment')
+parser.add_argument('--root_path', type=str, default='../data/ACDC', help='Name of Experiment')
 parser.add_argument('--exp', type=str, default='DCF', help='experiment_name')
 parser.add_argument('--model_1', type=str, default='resunet_feature', help='model_name')
 parser.add_argument('--model_2', type=str, default='swinunet_feature', help='model_name')
@@ -39,10 +41,10 @@ parser.add_argument('--throughput', action='store_true', help='Test throughput o
 args = parser.parse_args()
 
 label_num_mapping = {
-    "ACDC": {'5%': 3, '10%': 7, '15%':21, '20%': 14, '100%': 140},
-    "Prostate": {'5%': 2, '10%': 4, '20%': 7, '100%': 35},
-    "Hippocampus": {'5%': 8, '10%': 16, '20%': 31, '100%': 156},
-    "ATLAS":{'5%': 2, '10%': 4, '20%': 7, '100%': 36},
+    "ACDC": {'1%':1, '5%': 3, '10%': 7, '20%': 14, '30%': 21, '50%': 35, '70%': 49, '90%': 63, '100%': 70},
+    "Prostate": {'1%':1, '5%': 2, '10%': 4, '20%': 7, '25%': 9, '30%': 11, '50%': 18, '70%': 25, '90%': 32, '100%': 35},
+    "Hippocampus": {'1%': 2, '5%': 8, '10%': 16, '20%': 31, '30%': 47, '50%': 78, '70%': 109, '90%': 140, '100%': 156},
+    "ATLAS":{'1%':1, '5%': 2, '10%': 4, '20%': 7, '30%': 11, '50%': 18, '70%': 25, '90%': 32, '100%': 36}
 }
 
 if "ACDC" in args.root_path:
@@ -59,7 +61,7 @@ elif "ATLAS" in args.root_path:
     args.num_classes = 3
 else:
     print("Error")
-    sys.exit(1)
+    quit()
 
 def calculate_metric_percase(pred, gt):
     pred = (pred > 0).astype(np.uint8)
@@ -85,7 +87,7 @@ def test_single_volume(case, model_1, model_2, test_save_path, FLAGS):
     image = h5f['image'][:]
     label = h5f['label'][:]
 
-    prediction = np.zeros_like(label)
+    prediction_fusion = np.zeros_like(label)
     for ind in range(image.shape[0]):
         slice = image[ind, :, :]
         x, y = slice.shape[0], slice.shape[1]
@@ -100,23 +102,23 @@ def test_single_volume(case, model_1, model_2, test_save_path, FLAGS):
             except:
                 output_1 = model_1(input)
                 output_2 = model_2(input)
-            output = (output_1 + output_2) / 2
-            out = torch.argmax(torch.softmax(output, dim=1), dim=1).squeeze(0)
-            out = out.cpu().detach().numpy()
-            pred = zoom(out, (x / FLAGS.patch_size[0], y / FLAGS.patch_size[1]), order=0)
-            prediction[ind] = pred
+            output_fusion = (output_1 + output_2) / 2
+            out_fusion = torch.argmax(torch.softmax(output_fusion, dim=1), dim=1).squeeze(0)
+            out_fusion = out_fusion.cpu().detach().numpy()
+            pred_fusion = zoom(out_fusion, (x / FLAGS.patch_size[0], y / FLAGS.patch_size[1]), order=0)
+            prediction_fusion[ind] = pred_fusion
 
-    per_class_metrics = []
+    per_class_metrics_fusion = []
     for cls in range(1, FLAGS.num_classes):
         if np.sum(label == cls) == 0:
-            per_class_metrics.append((None, None, None, None))
+            per_class_metrics_fusion.append((float('nan'), float('nan'), float('nan'), float('nan')))
         else:
-            metrics = calculate_metric_percase(prediction == cls, label == cls)
-            per_class_metrics.append(metrics)
+            metrics_fusion = calculate_metric_percase(prediction_fusion == cls, label == cls)
+            per_class_metrics_fusion.append(metrics_fusion)
 
     img_itk = sitk.GetImageFromArray(image.astype(np.float32))
     img_itk.SetSpacing((1, 1, 10))
-    prd_itk = sitk.GetImageFromArray(prediction.astype(np.float32))
+    prd_itk = sitk.GetImageFromArray(prediction_fusion.astype(np.float32))
     prd_itk.SetSpacing((1, 1, 10))
     lab_itk = sitk.GetImageFromArray(label.astype(np.float32))
     lab_itk.SetSpacing((1, 1, 10))
@@ -125,7 +127,7 @@ def test_single_volume(case, model_1, model_2, test_save_path, FLAGS):
     sitk.WriteImage(img_itk, test_save_path + case + "_img.nii.gz")
     sitk.WriteImage(lab_itk, test_save_path + case + "_gt.nii.gz")
 
-    return per_class_metrics
+    return per_class_metrics_fusion
 
 def Inference(FLAGS):
     with open(FLAGS.root_path + '/test.list', 'r') as f:
@@ -154,51 +156,52 @@ def Inference(FLAGS):
     model_1.eval()
     model_2.eval()
 
-    total_metric_per_class = np.zeros((FLAGS.num_classes - 1, 4), dtype=np.float64)
-    all_metrics = []
+    total_metric_per_class_fusion = np.zeros((FLAGS.num_classes - 1, 4), dtype=np.float64)
+    all_metrics_fusion = []
 
     for case in tqdm(image_list):
-        case_metrics = test_single_volume(case, model_1, model_2, test_save_path, FLAGS)
-        case_metrics = np.asarray(case_metrics, dtype=np.float64)
+        case_metrics_fusion = test_single_volume(case, model_1, model_2, test_save_path, FLAGS)
+        case_metrics_fusion = np.asarray(case_metrics_fusion, dtype=np.float64)
 
-        total_metric_per_class += case_metrics
+        total_metric_per_class_fusion += case_metrics_fusion
 
         print(f"\n{case} results:")
-        row_metrics = [case]
+        row_metrics_fusion = [case]
 
         for cls in range(1, FLAGS.num_classes):
-            dice, jc, hd95, asd = case_metrics[cls - 1]
-            print(f"Model Class {cls:2d}: Dice: {dice:.6f}, JC: {jc:.6f}, HD95: {hd95:.6f}, ASD: {asd:.6f}")
-            row_metrics.extend([dice, jc, hd95, asd])
+            dice_fusion, jc_fusion, hd95_fusion, asd_fusion = case_metrics_fusion[cls - 1]
+            print(f"Model_fusion Class {cls:2d}: Dice: {dice_fusion:.6f}, JC: {jc_fusion:.6f}, HD95: {hd95_fusion:.6f}, ASD: {asd_fusion:.6f}")
+            row_metrics_fusion.extend([dice_fusion, jc_fusion, hd95_fusion, asd_fusion])
 
-        all_metrics.append(row_metrics)
+        all_metrics_fusion.append(row_metrics_fusion)
 
-    avg_metric_per_class = total_metric_per_class / len(image_list)
+    avg_metric_per_class_fusion = total_metric_per_class_fusion / len(image_list)
 
     header = ['Sample']
     for cls in range(1, FLAGS.num_classes):
         header.extend([f'Class {cls} Dice', f'Class {cls} JC', f'Class {cls} HD95', f'Class {cls} ASD'])
-    
-    csv_file = os.path.join(test_save_path, 'metrics_per_sample.csv')
-    with open(csv_file, 'w', newline='') as f:
+
+    csv_file_fusion = os.path.join(test_save_path, 'metrics_per_sample_fusion.csv')
+    with open(csv_file_fusion, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        writer.writerows(all_metrics)
+        writer.writerows(all_metrics_fusion)
 
-    return avg_metric_per_class, test_save_path
+    return avg_metric_per_class_fusion, test_save_path
 
 
 if __name__ == '__main__':
-    metric, test_save_path = Inference(args)
+    metric_fusion, test_save_path = Inference(args)
 
     for cls in range(1, args.num_classes):
-        print(f"Model Class {cls:2d} => Dice: {metric[cls - 1, 0]:.6f}, JC: {metric[cls - 1, 1]:.6f}, HD95: {metric[cls - 1, 2]:.6f}, ASD: {metric[cls - 1, 3]:.6f}")
+        print(f"Model_fusion Class {cls:2d} => Dice: {metric_fusion[cls - 1, 0]:.6f}, JC: {metric_fusion[cls - 1, 1]:.6f}, HD95: {metric_fusion[cls - 1, 2]:.6f}, ASD: {metric_fusion[cls - 1, 3]:.6f}")
 
-    mean_avg = np.nanmean(metric, axis=0)
-    print(f"\nModel Overall Average => Dice: {mean_avg[0]:.6f}, JC: {mean_avg[1]:.6f}, HD95: {mean_avg[2]:.6f}, ASD: {mean_avg[3]:.6f}")
+    mean_avg_fusion = np.nanmean(metric_fusion, axis=0)
+    print(f"\nModel_fusion Overall Average => Dice: {mean_avg_fusion[0]:.6f}, JC: {mean_avg_fusion[1]:.6f}, HD95: {mean_avg_fusion[2]:.6f}, ASD: {mean_avg_fusion[3]:.6f}")
+    print(f"{mean_avg_fusion[0]:.6f}")
 
     with open(test_save_path + '../performance.txt', 'w') as f:
         f.writelines("Per-class metrics:\n")
         for cls in range(1, args.num_classes):
-            f.writelines(f"Model Class {cls:2d} => Dice: {metric[cls - 1, 0]:.6f}, JC: {metric[cls - 1, 1]:.6f}, HD95: {metric[cls - 1, 2]:.6f}, ASD: {metric[cls - 1, 3]:.6f}\n")
-        f.writelines(f"\nModel Overall Average => Dice: {mean_avg[0]:.6f}, JC: {mean_avg[1]:.6f}, HD95: {mean_avg[2]:.6f}, ASD: {mean_avg[3]:.6f}\n")
+            f.writelines(f"Model_fusion Class {cls:2d} => Dice: {metric_fusion[cls - 1, 0]:.6f}, JC: {metric_fusion[cls - 1, 1]:.6f}, HD95: {metric_fusion[cls - 1, 2]:.6f}, ASD: {metric_fusion[cls - 1, 3]:.6f}\n")
+        f.writelines(f"\nModel_fusion Overall Average => Dice: {mean_avg_fusion[0]:.6f}, JC: {mean_avg_fusion[1]:.6f}, HD95: {mean_avg_fusion[2]:.6f}, ASD: {mean_avg_fusion[3]:.6f}\n")
