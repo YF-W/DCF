@@ -55,13 +55,13 @@ If you find this project useful, please consider citing:
 
 ```bibtex
 @article{DCF,
-  title={Breaking error coupling via divergent–convergent coordination for semi-supervised medical image segmentation},
+  title={Breaking error coupling via divergent--convergent coordination for semi-supervised medical image segmentation},
+  author={Wan, Yuxuan and Chen, Zhixuan and Xu, Yuquan and Xu, Yiyang and Li, Mingfeng and Wang, Yuefei},
   journal={Medical Image Analysis},
-  volume={114},
   pages={104236},
   year={2026},
+  publisher={Elsevier}
   doi={https://doi.org/10.1016/j.media.2026.104236},
-  author={Yuxuan Wan and Zhixuan Chen and Yuquan Xu and Yiyang Xu and Mingfeng Li and Yuefei Wang},
 }
 ```
 
